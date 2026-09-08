@@ -1,0 +1,8 @@
+# Copy to .env and fill in your values
+SF_INSTANCE=https://vistaops.salesforce.com
+SF_TOKEN_URL=https://login.salesforce.com/services/oauth2/token
+SF_CLIENT_ID=your_connected_app_client_id
+SF_CLIENT_SEC=your_connected_app_client_secret
+SF_USERNAME=nick@vistaops.com
+SF_PASSWORD=yourpassword+securitytoken
+MODEL_URL=https://your-deployed-api.railway.app

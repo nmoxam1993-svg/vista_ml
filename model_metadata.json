@@ -1,0 +1,26 @@
+{
+  "features": [
+    "Tenure_Days__c",
+    "Total_CallOffs__c",
+    "shift_calloffs",
+    "Performance_Rating__c",
+    "Cross_Trained__c",
+    "Float_Guard__c",
+    "Hourly_Rate__c",
+    "rate_ratio",
+    "site_type_enc",
+    "site_ot_pct",
+    "site_calloffs"
+  ],
+  "site_types": [
+    "Corporate",
+    "Healthcare",
+    "Industrial",
+    "Retail"
+  ],
+  "cv_auc": 0.981203007518797,
+  "n_samples": 126,
+  "churn_rate": 0.25396825396825395,
+  "threshold_high": 0.6,
+  "threshold_medium": 0.3
+}
