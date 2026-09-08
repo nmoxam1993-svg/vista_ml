@@ -1,0 +1,6 @@
+# Tells Railway's build system to install the OpenMP runtime library
+# that LightGBM's compiled core requires. Without this, LightGBM
+# fails with: OSError: libgomp.so.1: cannot open shared object file
+
+[phases.setup]
+aptPkgs = ["libgomp1"]
