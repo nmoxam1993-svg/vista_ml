@@ -109,6 +109,10 @@ class TestModule3(unittest.TestCase):
 class TestRealDataRegressions(unittest.TestCase):
     """Behaviour learned from the first real run (iteration 1)."""
 
+    def test_card_numbers_masked(self):
+        self.assertEqual(A.mask_cards("RBC Visa - Len 4506 0700 0849 2102"),
+                         "RBC Visa - Len **** **** **** 2102")
+
     def test_sub_customers_are_not_duplicates(self):
         entries = [("DSV Contract Logistics Inc.:3210 Airway Drive", "s", 2),
                    ("DSV Contract Logistics Inc.", "s", 3),

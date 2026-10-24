@@ -507,7 +507,17 @@ def naming_violations(coa=None, items=None):
     return out
 
 
+_CARD = re.compile(r"\b(?:\d{4}[ -]?){3}(\d{4})\b")
+
+
+def mask_cards(text):
+    """Card numbers live in some QBO payee names; never repeat them in reports."""
+    return _CARD.sub(lambda m: "**** **** **** " + m.group(1), text)
+
+
 def to_jsonable(obj):
+    if isinstance(obj, str):
+        return mask_cards(obj)
     if isinstance(obj, list):
         return [to_jsonable(o) for o in obj]
     if isinstance(obj, dict):

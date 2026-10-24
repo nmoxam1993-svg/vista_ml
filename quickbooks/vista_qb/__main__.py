@@ -51,7 +51,7 @@ def run(data_dir, out_dir, only=None):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     (out / "findings.json").write_text(json.dumps(A.to_jsonable(f), indent=1, default=str))
-    (out / "audit_report.md").write_text(render(f))
+    (out / "audit_report.md").write_text(A.mask_cards(render(f)))
     summary = {
         "datasets": f["datasets"], "missing": f["missing_datasets"],
         "gm_pct": f["cogs"]["totals"]["gross_margin_pct"],
