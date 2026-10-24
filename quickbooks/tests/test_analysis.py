@@ -109,6 +109,15 @@ class TestModule3(unittest.TestCase):
 class TestRealDataRegressions(unittest.TestCase):
     """Behaviour learned from the first real run (iteration 1)."""
 
+    def test_sales_tax_suspense_and_items_skipped(self):
+        from vista_qb.io import Table
+        coa = Table("coa.csv", ["Account Name", "Type"],
+                    [{"Account Name": "GST/HST Suspense", "Type": "Other Current Liabilities", "_line": 5}])
+        items = Table("items.csv", ["Name"], [{"Name": "MISC", "_line": 2}])
+        hits = A.black_holes({"coa": coa, "items": items})
+        self.assertEqual(len(hits), 1)
+        self.assertIn("Sales Tax centre", hits[0]["bank_rule"])
+
     def test_card_numbers_masked(self):
         self.assertEqual(A.mask_cards("RBC Visa - Len 4506 0700 0849 2102"),
                          "RBC Visa - Len **** **** **** 2102")

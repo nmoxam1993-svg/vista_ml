@@ -358,7 +358,8 @@ def black_holes(tables):
     """Scan every row of every loaded table for data-leakage terms."""
     out = []
     for key, table in tables.items():
-        if table is None:
+        # Product/service names are covered by vague_items; they are not ledger accounts.
+        if table is None or key == "items":
             continue
         # QBO-controlled type columns (e.g. "Other Miscellaneous Income") are not user data.
         text_cols = [h for h in table.headers
@@ -374,6 +375,14 @@ def black_holes(tables):
                     continue
                 term = next((t for t in rules.BLACK_HOLE_TERMS
                              if re.search(rf"\b{re.escape(t)}" + ("" if t == "discrepanc" else r"\b"), low)), None)
+                if term == "suspense" and re.search(r"gst|hst|pst|qst|sales tax", low):
+                    out.append({
+                        "file": table.file_name, "dataset": key, "line": row["_line"],
+                        "column": col, "text": val, "term": term,
+                        "balance": _amount_from_row(table, row),
+                        "root_cause": "QBO system sales-tax account: holds tax collected/paid on transactions dated after the last filed return. A large balance means returns are not filed/recorded in the Sales Tax centre, or tax was paid outside it.",
+                        "bank_rule": "No bank rule applies. Record each CRA remittance via Taxes > Record payment (never as an expense or transfer). File the open periods in the Sales Tax centre so Suspense moves to GST/HST Payable; reconcile Payable to CRA My Business Account."})
+                    break
                 if term:
                     out.append({
                         "file": table.file_name, "dataset": key, "line": row["_line"],
