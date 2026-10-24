@@ -26,14 +26,18 @@ def run(data_dir, out_dir, only=None):
     if "m1" in only:
         f["cogs"] = A.cogs_remap_matrix(pl_lines, tables.get("coa"))
         f["items"] = A.vague_items(tables.get("items")) or {}
+        f["non_operating_revenue"] = A.non_operating_revenue(pl_lines)
+        f["segments"] = A.segment_margins(pl_lines)
+        f["monthly_outliers"] = A.monthly_outliers(pl_lines)
     if "m2" in only:
         f["blended"] = A.blended_accounts(pl_lines, tables.get("vendor_spend"))
         f["black_holes"] = A.black_holes(tables)
     if "m3" in only:
         entries = []
-        for key, cols in (("vendors", ("Vendor", "Display name", "Name")),
+        for key, cols in (("vendors", ("Vendor", "Supplier", "Display name", "Name")),
                           ("customers", ("Customer", "Display name", "Name")),
-                          ("vendor_spend", ("Vendor", "Name", "Payee"))):
+                          ("sales_txn", ("Customer",)),
+                          ("vendor_spend", ("Vendor", "Payee", "Name"))):
             t = tables.get(key)
             c = t.col(*cols) if t else None
             if c:
@@ -57,7 +61,11 @@ def run(data_dir, out_dir, only=None):
                    "blended": len(f["blended"]), "black_holes": len(f["black_holes"]),
                    "duplicates": len(f["duplicates"]),
                    "tool_accounts": len(f["over_indexed"]["tool_named_accounts"]),
-                   "naming": len(f["naming"])},
+                   "naming": len(f["naming"]),
+                   "non_operating_revenue": len(f.get("non_operating_revenue", [])),
+                   "monthly_outliers": len(f.get("monthly_outliers", []))},
+        "segments": [(x["segment"], round(x["revenue"]), round(x["direct_cost"]), x["gross_margin_pct"])
+                     for x in f.get("segments", [])],
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=1, default=str))
     return f, summary

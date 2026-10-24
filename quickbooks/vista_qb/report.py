@@ -37,6 +37,18 @@ def render(f):
                     [(f"{m['file']} L{m['line']}", m["current_account"], m["current_typology"],
                       m["proposed_cogs_account"], m["amount"], m["gm_impact_pct_points"])
                      for m in f["cogs"]["matrix"]]))
+    L += ["", "### Gross margin by service line (direct costs wherever they sit today)", ""]
+    L.append(_table(["Segment", "Revenue", "Direct cost", "GM %", "Cost lines used"],
+                    [(x["segment"], x["revenue"], x["direct_cost"], x["gross_margin_pct"], "; ".join(x["cost_lines"]))
+                     for x in f.get("segments", [])]))
+    L += ["", "### Non-operating items booked as revenue", ""]
+    L.append(_table(["Line", "Account", "Amount", "Proposed"],
+                    [(f"{x['file']} L{x['line']}", x["account"], x["amount"], x["proposed"])
+                     for x in f.get("non_operating_revenue", [])]))
+    L += ["", "### Monthly spikes/drops (> 1.75x or < 1/1.75 of median month)", ""]
+    L.append(_table(["Line", "Account", "Month", "Amount", "Median month", "Ratio"],
+                    [(f"{x['file']} L{x['line']}", x["account"], x["month"], x["amount"], x["median_month"], x["ratio"])
+                     for x in f.get("monthly_outliers", [])]))
     L += ["", "### Product/Service items at misclassification risk", ""]
     L.append(_table(["Line", "Item", "Income Account", "Reasons"],
                     [(f"{i['file']} L{i['line']}", i["item"], i["income_account"], "; ".join(i["reasons"]))

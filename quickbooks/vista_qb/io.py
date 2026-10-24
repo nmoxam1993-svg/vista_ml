@@ -16,6 +16,7 @@ HEADER_HINTS = {
     "description", "amount", "total", "balance", "vendor", "customer",
     "product/service", "item", "income account", "sku", "date", "memo",
     "category", "split", "transaction type", "num", "display name",
+    "account name", "supplier", "payee", "no.",
 }
 
 _AMOUNT_RE = re.compile(r"^\(?-?\$?\s*[\d,]*\.?\d+\)?$")
@@ -81,6 +82,8 @@ def load_csv(path):
         record = {headers[j]: (row[j].strip() if j < len(row) else "")
                   for j in range(len(headers))}
         record["_line"] = offset
+        first = row[0] if row else ""
+        record["_indent"] = len(first) - len(first.lstrip(" "))  # QBO hierarchy
         table.rows.append(record)
     return table
 
@@ -90,9 +93,10 @@ DATASET_PATTERNS = [
     ("coa", r"(coa|chart.?of.?accounts|account.?list)"),
     ("pl", r"((^|[^a-z])p[\s_&-]*(and[\s_-]*)?l([^a-z]|$)|profit|income.?statement)"),
     ("items", r"(item|product|service.?list)"),
-    ("vendor_spend", r"(vendor.?spend|expenses.?by.?vendor|vendor.?expense)"),
-    ("vendors", r"(vendor.?list|vendor.?contact|^vendors?\b)"),
+    ("vendor_spend", r"(vendor.?spend|expenses.?by.?(vendor|supplier)|vendor.?expense|expenses?.?txn|^expenses?$)"),
+    ("vendors", r"(vendor.?list|vendor.?contact|^vendors?\b|supplier)"),
     ("customers", r"(customer.?list|customer.?contact|^customers?\b)"),
+    ("sales_txn", r"(sales.?txn|^sales$|sales.?transaction)"),
     ("gl", r"(general.?ledger|transaction.?detail|journal)"),
     ("cash_flow", r"(cash.?flow|statement.?of.?cash)"),
     ("balance_sheet", r"(balance.?sheet)"),

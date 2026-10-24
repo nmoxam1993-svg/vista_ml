@@ -106,6 +106,35 @@ class TestModule3(unittest.TestCase):
         self.assertNotIn("Utilities - Electric", bad)
 
 
+class TestRealDataRegressions(unittest.TestCase):
+    """Behaviour learned from the first real run (iteration 1)."""
+
+    def test_sub_customers_are_not_duplicates(self):
+        entries = [("DSV Contract Logistics Inc.:3210 Airway Drive", "s", 2),
+                   ("DSV Contract Logistics Inc.", "s", 3),
+                   ("RBC", "v", 4), ("R & B Construction", "v", 5)]
+        self.assertEqual(A.near_duplicates(entries), [])
+
+    def test_indented_parent_with_own_postings(self):
+        lines = A.parse_pl(load_csv(FIX / "pl_indented.csv"))
+        by = {l.name: l for l in lines}
+        self.assertEqual(by["Office wages"].parent, "Guard Wages")
+        self.assertEqual(by["Guard Wages"].amount, 600.0)
+        self.assertIn("Cost of Goods Sold", by)  # account named like its section
+        r = A.cogs_remap_matrix(lines)
+        names = {m["current_account"] for m in r["matrix"]}
+        self.assertIn("Guard Wages", names)
+        self.assertIn("WSIB Expense", names)
+        self.assertNotIn("Office wages", names)
+
+    def test_non_operating_revenue_and_outliers(self):
+        lines = A.parse_pl(load_csv(FIX / "pl_indented.csv"))
+        self.assertEqual([x["account"] for x in A.non_operating_revenue(lines)],
+                         ["foreign exchange gain/loss"])
+        spikes = A.monthly_outliers(lines, min_amount=0, min_delta=0)
+        self.assertTrue(any(x["account"] == "Guard Revenue" and x["month"] == "Mar" for x in spikes))
+
+
 class TestEndToEnd(unittest.TestCase):
     def test_cli_run_writes_reports(self):
         with tempfile.TemporaryDirectory() as out:

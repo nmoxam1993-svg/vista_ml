@@ -28,7 +28,7 @@ def _first(table, *names):
 
 
 def _amount_from_row(table, row):
-    for name in ("Balance", "Total", "Amount", "Open balance", "Sales price",
+    for name in ("Total before sales tax", "Balance", "Total balance", "Total", "Amount", "Open balance", "Sales price",
                  "Rate", "Debit", "Credit"):
         c = table.col(name)
         if c:
@@ -53,6 +53,7 @@ class PLLine:
     amount: float
     line: int
     file: str = "pl"
+    months: dict = None
 
 
 _SECTION_HEADS = [
@@ -63,35 +64,38 @@ _SECTION_HEADS = [
     ("expense", r"^(expenses?|operating expenses?)$"),
 ]
 _SKIP = re.compile(
-    r"^(total\b|gross profit|net (operating )?(income|other income|revenue)"
-    r"|net ordinary)", re.I)
+    r"^(total\b|gross profit|net (operating )?(income|other income|revenue|earnings)"
+    r"|net ordinary|profit$|net profit|net earnings)", re.I)
 
 
 def parse_pl(table):
     """Flatten a QBO Profit & Loss export into PLLine records.
 
-    Uses the "Total" column when present, otherwise sums every numeric
-    column (multi-month exports without a total).
+    Hierarchy comes from QBO's leading-space indentation; a parent account
+    that also has direct postings yields its own line and is the parent of the
+    more-indented rows below it. Uses the "Total" column when present,
+    otherwise sums every numeric column (multi-month exports without a total).
     """
     if table is None or not table.rows:
         return []
     name_col = table.headers[0]
     total_col = table.col("Total")
     numeric_cols = [h for h in table.headers[1:] if h != total_col]
-    section, parents, out = None, [], []
+    # stack of (indent, name, is_header). A header (no amount) stays open until
+    # its "Total ..." row, so flat exports without indentation still nest.
+    section, stack, out = None, [], []
     for row in table.rows:
         name = row.get(name_col, "").strip()
         if not name:
             continue
+        indent = row.get("_indent", 0)
         low = name.lower()
-        head = next((s for s, p in _SECTION_HEADS if re.match(p, low)), None)
-        if head:
-            section, parents = head, []
-            continue
         if _SKIP.match(low):
             m = re.match(r"^total (for )?(.*)$", low)
-            if m and parents and parents[-1].lower() == m.group(2).strip():
-                parents.pop()
+            if m and any(e[1].lower() == m.group(2).strip() for e in stack):
+                while stack and stack[-1][1].lower() != m.group(2).strip():
+                    stack.pop()
+                stack.pop()
             continue
         if total_col:
             amount = parse_amount(row.get(total_col))
@@ -99,12 +103,21 @@ def parse_pl(table):
             vals = [parse_amount(row.get(h)) for h in numeric_cols]
             vals = [v for v in vals if v is not None]
             amount = sum(vals) if vals else None
-        if amount is None:
-            parents.append(name)  # a parent header row with children below
+        # A section heading has no amount; an account can share its name
+        # (e.g. a "Cost of Goods Sold" account inside that section).
+        head = next((s for s, p in _SECTION_HEADS if re.match(p, low)), None)
+        if head and amount is None:
+            section, stack = head, []
             continue
-        out.append(PLLine(name, section or "unknown",
-                          parents[-1] if parents else "", amount, row["_line"],
-                          table.file_name))
+        while stack and (stack[-1][0] > indent or (stack[-1][0] == indent and not stack[-1][2])):
+            stack.pop()
+        parent = stack[-1][1] if stack else ""
+        stack.append((indent, name, amount is None))
+        if amount is None:
+            continue  # pure header row; children will reference it
+        months = {h: parse_amount(row.get(h)) or 0.0 for h in numeric_cols} if total_col else None
+        out.append(PLLine(name, section or "unknown", parent, amount, row["_line"],
+                          table.file_name, months))
     return out
 
 
@@ -127,8 +140,11 @@ def cogs_remap_matrix(pl_lines, coa=None):
     for l in pl_lines:
         if l.section not in ("expense", "other_expense"):
             continue
-        text = f"{l.parent} {l.name}"
-        hit = next((t for t in rules.VARIABLE_COST_SIGNALS if _contains(text, t[0])), None)
+        if any(_contains(l.name, k) for k in rules.NOT_COGS_SIGNALS):
+            continue
+        hit = next((t for t in rules.VARIABLE_COST_SIGNALS if _contains(l.name, t[0])), None)
+        if not hit and l.parent:
+            hit = next((t for t in rules.VARIABLE_COST_SIGNALS if _contains(l.parent, t[0])), None)
         if not hit:
             continue
         impact = (-l.amount / rev * 100) if rev else None
@@ -208,6 +224,49 @@ def vague_items(items):
     return {"items": out, "shared_income_accounts": shared}
 
 
+def non_operating_revenue(pl_lines):
+    """Income-section lines that are not operating revenue (FX, interest, gains)."""
+    return [{"file": l.file, "line": l.line, "account": l.name, "amount": l.amount,
+             "proposed": "Other Income - " + ("Foreign Exchange" if re.search(r"exchange|fx", l.name, re.I) else "Interest" if re.search(r"interest", l.name, re.I) else "Gains/Losses")}
+            for l in pl_lines if l.section == "income"
+            and re.search(r"exchange|\bfx\b|interest|gain|loss", l.name, re.I)]
+
+
+def segment_margins(pl_lines, segment_map=None):
+    """Gross margin per service line using rules.SEGMENT_MAP keyword pairs."""
+    segment_map = segment_map or rules.SEGMENT_MAP
+    out = []
+    for seg, (rev_kw, cost_kw) in segment_map.items():
+        rev = [l for l in pl_lines if l.section == "income" and any(_contains(l.name, k) for k in rev_kw)]
+        cost = [l for l in pl_lines if l.section in ("cogs", "expense")
+                and not any(_contains(l.name, k) for k in rules.NOT_COGS_SIGNALS)
+                and any(_contains(f"{l.parent} {l.name}", k) for k in cost_kw)]
+        r, c = sum(l.amount for l in rev), sum(l.amount for l in cost)
+        out.append({"segment": seg, "revenue": r, "direct_cost": c,
+                    "gross_margin_pct": round((r - c) / r * 100, 1) if r else None,
+                    "revenue_lines": [f"L{l.line} {l.name}" for l in rev],
+                    "cost_lines": [f"L{l.line} {l.name} ({l.section})" for l in cost]})
+    return out
+
+
+def monthly_outliers(pl_lines, factor=1.75, min_amount=10000, min_delta=25000):
+    """Months where a line is > factor x its median month (or < median / factor)
+    and differs from the median by at least min_delta dollars."""
+    out = []
+    for l in pl_lines:
+        if not l.months or abs(l.amount) < min_amount:
+            continue
+        vals = sorted(l.months.values())
+        med = vals[len(vals) // 2]
+        if med <= 0:
+            continue
+        for month, v in l.months.items():
+            if (v > med * factor or v < med / factor) and abs(v - med) >= min_delta:
+                out.append({"file": l.file, "line": l.line, "account": l.name, "month": month,
+                            "amount": v, "median_month": med, "ratio": round(v / med, 2)})
+    return out
+
+
 # ---------------------------------------------------------------- Module 2
 
 
@@ -245,7 +304,7 @@ def blended_accounts(pl_lines, vendor_spend=None):
                              "source": "account name combines fixed and variable cost types"})
     # 3) Vendor spend: one account receiving fixed-type and variable-type vendors.
     if vendor_spend is not None:
-        v_col = _first(vendor_spend, "Vendor", "Name", "Payee")
+        v_col = _first(vendor_spend, "Vendor", "Supplier", "Payee", "Name")
         a_col = _first(vendor_spend, "Account", "Category", "Expense account", "Split")
         m_col = _first(vendor_spend, "Memo", "Memo/Description", "Description")
         if v_col and a_col:
@@ -261,7 +320,7 @@ def blended_accounts(pl_lines, vendor_spend=None):
                         fixed.append(r.get(v_col, ""))
                     if v:
                         var.append(r.get(v_col, ""))
-                if fixed and var and acct:
+                if fixed and var and acct and acct.strip("- ").lower() != "split":
                     findings.append({
                         "file": vendor_spend.file_name, "account": acct,
                         "lines": [r["_line"] for r in rows_],
@@ -276,6 +335,7 @@ _ROOT_CAUSE = {
     "uncategorized": "Bank-feed transactions accepted with no matching rule; QBO defaults them to Uncategorized Income/Expense/Asset.",
     "ask my accountant": "Bookkeeper deferral bucket with no month-end clearing cadence; items wait indefinitely for review.",
     "suspense": "Unidentified receipts/payments parked pending research; usually unmatched deposits or duplicate imports.",
+    "discrepanc": "Bank reconciliation forced to balance; QBO posts the unexplained difference here, meaning a past reconciliation was not truly completed.",
     "clearing": "Gross-vs-net timing gap (payroll, merchant payouts, transfers) never trued up; residual balance means a leg is missing.",
     "miscellaneous": "Catch-all used when the vendor/purpose was not mapped; hides a recurring cost that deserves its own account or vendor.",
     "misc": "Catch-all used when the vendor/purpose was not mapped; hides a recurring cost that deserves its own account or vendor.",
@@ -286,6 +346,7 @@ _RULE = {
     "uncategorized": "Rule (Money out, all bank accounts): IF Description CONTAINS '<payee token from bank text>' AND Amount BETWEEN <min> AND <max> THEN Category = <specific expense account>, Payee = <normalized vendor>, Class = <site type>; leave Auto-add OFF for 30 days, then ON. Month-end control: Uncategorized balance must be $0.",
     "ask my accountant": "Do not target AMA with any rule. Add rule per recurring payee found in AMA: IF Description CONTAINS '<payee token>' THEN Category = <account>, Payee = <vendor>. Close checklist: AMA = $0 before books close; anything older than 30 days escalates.",
     "suspense": "Rule: IF Description CONTAINS 'DEPOSIT' AND Payee IS BLANK THEN do not auto-add (review only). Match deposits to open invoices first (Receive Payment), never to Suspense. Control: Suspense = $0 at close.",
+    "discrepanc": "No bank rule applies. Re-open the reconciliation that created the discrepancy (Reconcile > History), find the missing/duplicate item, and post it to its real account. Control: never click 'Add adjustment' on reconcile.",
     "clearing": "Rule (Money in): IF Description CONTAINS '<processor/payroll token, e.g. STRIPE, ADP>' THEN Transfer to <Processor> Clearing; record fees via split line to 'Cost of Revenue - Payment Processing Fees'. Reconcile clearing to processor payout report monthly; residual must be $0.",
     "miscellaneous": "Rule: IF Description CONTAINS '<payee token>' THEN Category = <specific account>, Payee = <vendor>. Make 'Miscellaneous' inactive so neither rules nor users can select it.",
     "misc": "Rule: IF Description CONTAINS '<payee token>' THEN Category = <specific account>, Payee = <vendor>. Make 'Misc' inactive so neither rules nor users can select it.",
@@ -312,7 +373,7 @@ def black_holes(tables):
                 if any(a in low for a in rules.BLACK_HOLE_ALLOWLIST) and "uncategorized" not in low:
                     continue
                 term = next((t for t in rules.BLACK_HOLE_TERMS
-                             if re.search(rf"\b{re.escape(t)}\b", low)), None)
+                             if re.search(rf"\b{re.escape(t)}" + ("" if t == "discrepanc" else r"\b"), low)), None)
                 if term:
                     out.append({
                         "file": table.file_name, "dataset": key, "line": row["_line"],
@@ -336,7 +397,7 @@ def normalize_name(name):
 def _acronym(name):
     """Initials of the raw name ("Amazon Web Services" -> "aws"); suffixes kept."""
     tokens = [t for t in re.sub(r"[^a-z0-9 ]", " ", name.lower()).split()
-              if t not in ("and", "of", "the", "inc", "llc", "ltd", "corp", "co")]
+              if t not in ("and", "of", "the", "inc", "llc", "ltd", "corp", "co") and len(t) > 1]
     return "".join(t[0] for t in tokens) if len(tokens) >= 2 else ""
 
 
@@ -351,6 +412,10 @@ def near_duplicates(entries, threshold=0.88):
     out = []
     for (a, na), (b, nb) in combinations(norm, 2):
         if not na or not nb:
+            continue
+        # QBO sub-customers ("Client:Site") under the same client are hierarchy, not duplicates.
+        pa, pb = a[0].split(":")[0].strip().lower(), b[0].split(":")[0].strip().lower()
+        if (":" in a[0] or ":" in b[0]) and pa == pb:
             continue
         reason = None
         if na == nb:
@@ -380,7 +445,7 @@ def near_duplicates(entries, threshold=0.88):
 def over_indexed(coa, max_children=8):
     if coa is None:
         return {"crowded_parents": [], "tool_named_accounts": []}
-    name_col = _first(coa, "Full name", "Account", "Name", "Account name")
+    name_col = _first(coa, "Full name", "Account Name", "Account", "Name")
     children = {}
     tool_accounts = []
     for row in coa.rows:
@@ -405,13 +470,17 @@ def naming_violations(coa=None, items=None):
     item_re = re.compile(rules.ITEM_NAME_PATTERN)
     targets = []
     if coa is not None:
-        c = _first(coa, "Full name", "Account", "Name", "Account name")
+        c = _first(coa, "Full name", "Account Name", "Account", "Name")
         targets += [("account", coa.file_name, r["_line"], r.get(c, "").split(":")[-1].strip(),
                      r.get(c, ""), acct_re) for r in coa.rows]
     if items is not None:
         c = _first(items, "Product/Service Name", "Product/Service", "Name", "Item")
-        targets += [("item", items.file_name, r["_line"], r.get(c, "").strip(),
-                     r.get(c, ""), item_re) for r in items.rows]
+        t_col = _first(items, "Item type", "Type")
+        for r in items.rows:
+            is_service = (r.get(t_col, "") if t_col else "Service").lower() == "service"
+            # Hardware catalog SKUs keep vendor part names; only services get the strict syntax.
+            targets.append(("item", items.file_name, r["_line"], r.get(c, "").strip(),
+                            r.get(c, ""), item_re if is_service else None))
     for kind, fname, line, leaf, raw, regex in targets:
         reasons = []
         if raw != raw.strip() or "  " in raw:
@@ -422,9 +491,15 @@ def naming_violations(coa=None, items=None):
             reasons.append("non-standard separator (_ or |)")
         if re.search(r"\S-\S", leaf) and kind == "account":
             reasons.append("hyphen without spaces")
+        if re.search(r"[A-Za-z]\d+$|-\d+$", leaf) and kind == "account":
+            reasons.append("trailing digit suffix (duplicate-account artifact)")
+        if "(deleted)" in leaf.lower():
+            reasons.append("deleted account still referenced")
         if re.search(r"\b(19|20)\d{2}\b", leaf):
             reasons.append("contains a year (use dates/classes, not account names)")
-        if not regex.match(leaf):
+        if re.match(r"^[^A-Za-z0-9]|[^A-Za-z0-9)]$", leaf):
+            reasons.append("leading/trailing punctuation")
+        if regex is not None and not regex.match(leaf):
             reasons.append("does not match proposed syntax")
         if reasons:
             out.append({"kind": kind, "file": fname, "line": line, "name": raw,
