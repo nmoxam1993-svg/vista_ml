@@ -1,0 +1,12 @@
+Account List
+,
+Full name,Type,Detail type,Balance
+Checking,Bank,Checking,"50,000.00"
+Stripe Clearing,Other Current Assets,Other Current Assets,"1,200.00"
+Uncategorized Asset,Other Current Assets,Other Current Assets,"300.00"
+Contract Guard Services,Income,Service/Fee Income,
+Software:Slack,Expenses,Software,
+Software:Zoom,Expenses,Software,
+OFFICE_SUPPLIES 2024,Expenses,Office Supplies,
+Utilities - Electric,Expenses,Utilities,
+Other Income,Other Income,Other Miscellaneous Income,

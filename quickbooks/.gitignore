@@ -1,0 +1,7 @@
+# Financial data never leaves the analyst's machine by default.
+data/raw/*
+!data/raw/.gitkeep
+reports/*
+!reports/.gitkeep
+__pycache__/
+*.pyc

@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "deny": [
+      "mcp__Intuit_QuickBooks__qbo_catalog_create_product",
+      "mcp__Intuit_QuickBooks__qbo_contact_create_customer",
+      "mcp__Intuit_QuickBooks__qbo_payroll_assign_employee_work_location",
+      "mcp__Intuit_QuickBooks__qbo_payroll_create_employee",
+      "mcp__Intuit_QuickBooks__qbo_payroll_save_employee_contract_details",
+      "mcp__Intuit_QuickBooks__qbo_payroll_update_employee",
+      "mcp__Intuit_QuickBooks__qbo_sales_create_estimate",
+      "mcp__Intuit_QuickBooks__qbo_sales_create_invoice",
+      "mcp__Intuit_QuickBooks__qbo_sales_create_payment_link",
+      "mcp__Intuit_QuickBooks__qbo_sales_create_recurring_invoice",
+      "mcp__Intuit_QuickBooks__qbo_sales_delete_estimate",
+      "mcp__Intuit_QuickBooks__qbo_sales_delete_invoice",
+      "mcp__Intuit_QuickBooks__qbo_sales_delete_recurring_invoice",
+      "mcp__Intuit_QuickBooks__qbo_sales_duplicate_estimate",
+      "mcp__Intuit_QuickBooks__qbo_sales_duplicate_invoice",
+      "mcp__Intuit_QuickBooks__qbo_sales_operate_recurring_invoice",
+      "mcp__Intuit_QuickBooks__qbo_sales_send_estimate",
+      "mcp__Intuit_QuickBooks__qbo_sales_send_invoice",
+      "mcp__Intuit_QuickBooks__qbo_sales_send_invoice_reminder",
+      "mcp__Intuit_QuickBooks__qbo_sales_send_payment_link",
+      "mcp__Intuit_QuickBooks__qbo_sales_update_estimate",
+      "mcp__Intuit_QuickBooks__qbo_sales_update_invoice",
+      "mcp__Intuit_QuickBooks__qbo_sales_update_payment_link",
+      "mcp__Intuit_QuickBooks__qbo_sales_update_recurring_invoice",
+      "mcp__Intuit_QuickBooks__qbo_sales_update_settings",
+      "mcp__Intuit_QuickBooks__quickbooks_profile_info_update",
+      "mcp__Intuit_QuickBooks__quickbooks_transaction_import",
+      "mcp__Intuit_QuickBooks__money_onboarding_application_submit"
+    ]
+  }
+}
