@@ -6,7 +6,7 @@ Deploy on any Python host (Heroku, Railway, EC2, etc.)
 Salesforce connects via a Named Credential pointing to your URL.
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -20,6 +20,14 @@ with open(os.path.join(BASE, 'model_metadata.json')) as f:
     meta = json.load(f)
 
 FEATURES = meta['features']
+
+# If API_KEY is set on the host, prediction endpoints require a matching X-API-Key header
+# (Salesforce sends it via the Named Credential). Unset = open, handy for local testing.
+API_KEY = os.getenv("API_KEY", "")
+
+def require_key(x_api_key: str = Header(default="")):
+    if API_KEY and x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 app = FastAPI(
     title="Vista Security — Churn Prediction API",
@@ -88,7 +96,7 @@ def health():
     return {"status": "ok", "model_auc": meta['cv_auc'],
             "n_training_samples": meta['n_samples']}
 
-@app.post("/predict/churn", response_model=PredictionResult)
+@app.post("/predict/churn", response_model=PredictionResult, dependencies=[Depends(require_key)])
 def predict_churn(guard: GuardFeatures):
     """
     Called by Salesforce Apex ChurnModelCallout.cls.
@@ -123,7 +131,7 @@ def predict_churn(guard: GuardFeatures):
         recommended_action = action,
     )
 
-@app.post("/predict/churn/batch")
+@app.post("/predict/churn/batch", dependencies=[Depends(require_key)])
 def predict_batch(guards: list[GuardFeatures]):
     """Batch endpoint — score multiple guards in one call."""
     return [predict_churn(g) for g in guards]
