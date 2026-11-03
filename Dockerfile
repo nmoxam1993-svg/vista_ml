@@ -16,5 +16,6 @@ COPY . .
 
 EXPOSE 8000
 
-# Hosts such as Railway/Render inject $PORT; fall back to 8000 locally.
-CMD ["sh", "-c", "uvicorn churn_api:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Fixed on 8000 because the Railway public domain forwards to port 8000.
+# (Using Railway's injected $PORT made the app listen on 8080, and the domain then returned 502.)
+CMD ["uvicorn", "churn_api:app", "--host", "0.0.0.0", "--port", "8000"]
