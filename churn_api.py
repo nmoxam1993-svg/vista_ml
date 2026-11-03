@@ -36,7 +36,9 @@ API_KEY = os.getenv("API_KEY", "")
 
 def require_key(x_api_key: str = Header(default="")):
     if API_KEY and x_api_key != API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+        # Only the LENGTH of what arrived is reported, never the key itself (helps debug header problems)
+        raise HTTPException(status_code=401,
+                            detail=f"Invalid or missing API key (received {len(x_api_key)} characters)")
 
 app = FastAPI(
     title="Vista Security — Churn Prediction API",
