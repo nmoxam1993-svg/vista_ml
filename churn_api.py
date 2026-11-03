@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 import joblib, json, numpy as np, os
+from tenure_smoothing import blend
 
 # ── Load model artifacts ───────────────────────────────────────────────────
 BASE   = os.path.dirname(__file__)
@@ -20,6 +21,14 @@ with open(os.path.join(BASE, 'model_metadata.json')) as f:
     meta = json.load(f)
 
 FEATURES = meta['features']
+
+# Tenure smoothing (see tenure_smoothing.py). The raw model is a cliff at ~197 days; these settings
+# turn it into a gradual curve centred on TENURE_MIDPOINT_DAYS. Override with environment variables.
+TENURE_MIDPOINT_DAYS = float(os.getenv("TENURE_MIDPOINT_DAYS", "90"))
+TENURE_SPREAD_DAYS   = float(os.getenv("TENURE_SPREAD_DAYS", "30"))
+NEW_HIRE_TENURE_CAP  = 100.0   # inside the model's high-risk plateau (anything <= 197 scores the same)
+SETTLED_TENURE_FLOOR = 250.0   # inside the low-risk plateau; longer tenures keep their own model value
+TENURE_COL = FEATURES.index('Tenure_Days__c')
 
 # If API_KEY is set on the host, prediction endpoints require a matching X-API-Key header
 # (Salesforce sends it via the Named Credential). Unset = open, handy for local testing.
@@ -119,7 +128,14 @@ def predict_churn(guard: GuardFeatures):
         guard.site_calloffs,
     ]])
 
-    prob  = float(model.predict_proba(feature_vector)[0][1])
+    # Score as a new hire and as a settled guard, then blend smoothly by actual tenure
+    as_new     = feature_vector.copy()
+    as_settled = feature_vector.copy()
+    as_new[0, TENURE_COL]     = min(guard.tenure_days, NEW_HIRE_TENURE_CAP)
+    as_settled[0, TENURE_COL] = max(guard.tenure_days, SETTLED_TENURE_FLOOR)
+    prob = blend(float(model.predict_proba(as_new)[0][1]),
+                 float(model.predict_proba(as_settled)[0][1]),
+                 guard.tenure_days, TENURE_MIDPOINT_DAYS, TENURE_SPREAD_DAYS)
     tier  = "High" if prob >= 0.6 else "Medium" if prob >= 0.3 else "Low"
     top_factor, action = explain(guard, prob)
 
@@ -144,6 +160,7 @@ def model_info():
         "training_samples":  meta['n_samples'],
         "churn_rate":        meta['churn_rate'],
         "thresholds":        {"high": 0.6, "medium": 0.3},
+        "tenure_smoothing":  {"midpoint_days": TENURE_MIDPOINT_DAYS, "spread_days": TENURE_SPREAD_DAYS},
     }
 
 if __name__ == "__main__":
