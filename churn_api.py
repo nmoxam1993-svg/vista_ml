@@ -21,6 +21,11 @@ with open(os.path.join(BASE, 'model_metadata.json')) as f:
     meta = json.load(f)
 
 FEATURES = meta['features']
+THRESHOLD_HIGH   = meta.get('threshold_high', 0.6)
+THRESHOLD_MEDIUM = meta.get('threshold_medium', 0.3)
+# Snapshot models (trained by train_churn.py, 'horizon_days' in the metadata) learn the tenure curve themselves,
+# so smoothing is only applied to the legacy one-row-per-guard model.
+SMOOTH_TENURE = 'horizon_days' not in meta
 
 # Tenure smoothing (see tenure_smoothing.py). The raw model is a cliff at ~197 days; these settings
 # turn it into a gradual curve centred on TENURE_MIDPOINT_DAYS. Override with environment variables.
@@ -130,15 +135,18 @@ def predict_churn(guard: GuardFeatures):
         guard.site_calloffs,
     ]])
 
-    # Score as a new hire and as a settled guard, then blend smoothly by actual tenure
-    as_new     = feature_vector.copy()
-    as_settled = feature_vector.copy()
-    as_new[0, TENURE_COL]     = min(guard.tenure_days, NEW_HIRE_TENURE_CAP)
-    as_settled[0, TENURE_COL] = max(guard.tenure_days, SETTLED_TENURE_FLOOR)
-    prob = blend(float(model.predict_proba(as_new)[0][1]),
-                 float(model.predict_proba(as_settled)[0][1]),
-                 guard.tenure_days, TENURE_MIDPOINT_DAYS, TENURE_SPREAD_DAYS)
-    tier  = "High" if prob >= 0.6 else "Medium" if prob >= 0.3 else "Low"
+    if SMOOTH_TENURE:
+        # Score as a new hire and as a settled guard, then blend smoothly by actual tenure
+        as_new     = feature_vector.copy()
+        as_settled = feature_vector.copy()
+        as_new[0, TENURE_COL]     = min(guard.tenure_days, NEW_HIRE_TENURE_CAP)
+        as_settled[0, TENURE_COL] = max(guard.tenure_days, SETTLED_TENURE_FLOOR)
+        prob = blend(float(model.predict_proba(as_new)[0][1]),
+                     float(model.predict_proba(as_settled)[0][1]),
+                     guard.tenure_days, TENURE_MIDPOINT_DAYS, TENURE_SPREAD_DAYS)
+    else:
+        prob = float(model.predict_proba(feature_vector)[0][1])
+    tier  = "High" if prob >= THRESHOLD_HIGH else "Medium" if prob >= THRESHOLD_MEDIUM else "Low"
     top_factor, action = explain(guard, prob)
 
     return PredictionResult(
@@ -161,8 +169,9 @@ def model_info():
         "cv_auc":            meta['cv_auc'],
         "training_samples":  meta['n_samples'],
         "churn_rate":        meta['churn_rate'],
-        "thresholds":        {"high": 0.6, "medium": 0.3},
-        "tenure_smoothing":  {"midpoint_days": TENURE_MIDPOINT_DAYS, "spread_days": TENURE_SPREAD_DAYS},
+        "thresholds":        {"high": THRESHOLD_HIGH, "medium": THRESHOLD_MEDIUM},
+        "horizon_days":      meta.get("horizon_days"),
+        "tenure_smoothing":  {"enabled": SMOOTH_TENURE, "midpoint_days": TENURE_MIDPOINT_DAYS, "spread_days": TENURE_SPREAD_DAYS},
     }
 
 if __name__ == "__main__":

@@ -18,9 +18,11 @@
     "Industrial",
     "Retail"
   ],
-  "cv_auc": 0.981203007518797,
-  "n_samples": 126,
-  "churn_rate": 0.25396825396825395,
-  "threshold_high": 0.6,
-  "threshold_medium": 0.3
+  "cv_auc": 0.9412179102012705,
+  "n_samples": 201,
+  "n_snapshots": 21659,
+  "churn_rate": 0.02488572879634332,
+  "horizon_days": 30,
+  "threshold_high": 0.2,
+  "threshold_medium": 0.1
 }
