@@ -27,6 +27,9 @@
   .row { display:flex; gap:8px; margin-top:12px; }
   .row button { flex:1; }
   .listening { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .heard { color:var(--muted); font-size:.85rem; min-height:1.3em; font-style:italic; overflow-wrap:anywhere; }
+  .sens { display:block; margin-top:10px; color:var(--muted); font-size:.9rem; }
+  .sens select { font:inherit; margin-left:6px; padding:6px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
   #status { color:var(--muted); font-size:.9rem; min-height:1.3em; margin-top:8px; }
   .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:24px 0 8px; }
   .stat { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 4px; }
@@ -54,6 +57,10 @@
     <button id="listen">🎤 Listen</button>
   </div>
   <div id="status"></div>
+  <div id="heard" class="heard"></div>
+  <label class="sens">Sensitivity
+    <select id="sens"><option value="normal">Normal</option><option value="high">High (catches mishearings)</option></select>
+  </label>
 
   <div class="stats">
     <div class="stat"><b id="today">0</b><span>today</span></div>
@@ -126,14 +133,20 @@ let rec = null, listening = false;
 
 // Phonetic matching: reduce a word to its consonant skeleton so that
 // "allegedly", "alledgedly", "alegedly", "a leg edly" etc. all collapse to the same key.
-function phoneticKey(w) {
-  return w.toLowerCase().replace(/[^a-z]/g, '')
+function phoneticKey(w, loose) {
+  let k = w.toLowerCase().replace(/[^a-z]/g, '')
     .replace(/dge|dg/g, 'j').replace(/g(?=[eiy])/g, 'j')   // soft g / dg -> j
-    .replace(/ph/g, 'f').replace(/ck|c(?=[aou])|q/g, 'k')
-    .replace(/[aeiouyhw]/g, '')                              // drop vowels
+    .replace(/ph/g, 'f').replace(/ck|c(?=[aou])|q/g, 'k');
+  if (loose) {
+    // Sound-alike consonants a recogniser tends to swap: t/d, ch/sh/j, k/g, n and r dropped.
+    k = k.replace(/ch|sh/g, 'j').replace(/t/g, 'd').replace(/k/g, 'g').replace(/[nr]/g, '');
+  }
+  return k.replace(/[aeiouyhw]/g, '')                        // drop vowels
     .replace(/(.)\1+/g, '$1');                               // collapse doubles
 }
-const TARGET = phoneticKey('allegedly'); // "ljdl"; "alleged" -> "ljd" so it will not match
+const TARGETS = { normal: phoneticKey('allegedly'), high: phoneticKey('allegedly', true) };
+let sensitivity = 'high';
+try { sensitivity = localStorage.getItem('allegedly-sens') || 'high'; } catch {}
 
 // Count matches in one transcript. Tries 1-3 adjacent words joined, so a
 // recogniser that splits the word ("a leg edly") still counts once.
@@ -144,7 +157,7 @@ function countIn(text) {
     let hit = 0;
     for (let len = 1; len <= 3 && i + len <= words.length; len++) {
       const joined = words.slice(i, i + len).join('');
-      if (joined.length >= 6 && phoneticKey(joined) === TARGET) { hit = len; break; }
+      if (joined.length >= (sensitivity === 'high' ? 5 : 6) && phoneticKey(joined, sensitivity === 'high') === TARGETS[sensitivity]) { hit = len; break; }
     }
     if (hit) { n++; i += hit; } else i++;
   }
@@ -159,6 +172,8 @@ function startListening() {
   rec.lang = 'en-US';
   const counted = {}; // per-result-index count of words already added
   rec.onresult = ev => {
+    const last = ev.results[ev.results.length - 1];
+    $('heard').textContent = 'Heard: "' + last[0].transcript.trim().slice(-80) + '"';
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
       let n = 0; // best count across all alternative transcriptions
       for (let a = 0; a < ev.results[i].length; a++) n = Math.max(n, countIn(ev.results[i][a].transcript));
@@ -183,6 +198,9 @@ $('listen').onclick = () => {
   $('status').textContent = listening ? 'Listening for "allegedly"…' : '';
   if (listening) startListening(); else rec && rec.stop();
 };
+
+$('sens').value = sensitivity;
+$('sens').onchange = e => { sensitivity = e.target.value; try { localStorage.setItem('allegedly-sens', sensitivity); } catch {} };
 
 render();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
