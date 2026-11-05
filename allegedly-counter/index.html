@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Allegedly Counter</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<meta name="theme-color" content="#c0392b">
+<style>
+  :root { --bg:#fafaf7; --fg:#1d1d1b; --muted:#6b6b66; --card:#fff; --accent:#c0392b; --line:#e5e3dc; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161615; --fg:#f2f1ec; --muted:#9a9a93; --card:#212120; --accent:#ff6b5a; --line:#333; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.4 system-ui,sans-serif; }
+  main { max-width:480px; margin:0 auto; padding:24px 16px 48px; text-align:center; }
+  h1 { font-size:1.2rem; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 20px; }
+  .count { font-size:7rem; font-weight:800; line-height:1; margin:8px 0; font-variant-numeric:tabular-nums; }
+  .label { color:var(--muted); margin-bottom:20px; }
+  button { font:inherit; border:1px solid var(--line); background:var(--card); color:var(--fg);
+           border-radius:12px; padding:12px 16px; cursor:pointer; }
+  button.big { width:100%; background:var(--accent); color:#fff; border:0; font-size:1.4rem;
+               font-weight:700; padding:28px 16px; border-radius:20px; }
+  button.big:active { transform:scale(.98); }
+  .row { display:flex; gap:8px; margin-top:12px; }
+  .row button { flex:1; }
+  .listening { background:var(--accent); color:#fff; border-color:var(--accent); }
+  #status { color:var(--muted); font-size:.9rem; min-height:1.3em; margin-top:8px; }
+  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:24px 0 8px; }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 4px; }
+  .stat b { display:block; font-size:1.5rem; }
+  .stat span { color:var(--muted); font-size:.8rem; }
+  h2 { font-size:1rem; text-align:left; margin:24px 0 8px; }
+  ul { list-style:none; margin:0; padding:0; text-align:left; }
+  li { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line); }
+  li small { color:var(--muted); }
+  li .src { margin-left:8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Chris's "Allegedly" Counter</h1>
+  <p class="sub">Tap each time he says it — or let your phone listen.</p>
+
+  <div class="count" id="count" aria-live="polite">0</div>
+  <div class="label">times, allegedly</div>
+
+  <button class="big" id="tap">+1 Allegedly</button>
+
+  <div class="row">
+    <button id="undo">Undo</button>
+    <button id="listen">🎤 Listen</button>
+  </div>
+  <div id="status"></div>
+
+  <div class="stats">
+    <div class="stat"><b id="today">0</b><span>today</span></div>
+    <div class="stat"><b id="week">0</b><span>last 7 days</span></div>
+    <div class="stat"><b id="perday">0</b><span>avg / day</span></div>
+  </div>
+
+  <h2>Recent</h2>
+  <ul id="log"></ul>
+
+  <div class="row" style="margin-top:24px">
+    <button id="export">Export CSV</button>
+    <button id="reset">Reset</button>
+  </div>
+</main>
+
+<script>
+const KEY = 'allegedly-events-v1';
+const $ = id => document.getElementById(id);
+
+function load() {
+  try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; }
+}
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(events)); } catch {}
+}
+let events = load(); // [{t: epochMs, src: 'tap'|'voice'}]
+
+function add(src) {
+  events.push({ t: Date.now(), src });
+  save(); render();
+  if (navigator.vibrate) navigator.vibrate(30);
+}
+
+function render() {
+  const now = Date.now(), DAY = 864e5;
+  const startOfToday = new Date().setHours(0, 0, 0, 0);
+  const today = events.filter(e => e.t >= startOfToday).length;
+  const week = events.filter(e => e.t >= now - 7 * DAY).length;
+  const first = events.length ? events[0].t : now;
+  const days = Math.max(1, Math.ceil((now - first) / DAY));
+
+  $('count').textContent = events.length;
+  $('today').textContent = today;
+  $('week').textContent = week;
+  $('perday').textContent = (events.length / days).toFixed(1);
+
+  $('log').innerHTML = events.slice(-15).reverse().map(e =>
+    `<li><span>${new Date(e.t).toLocaleString([], {weekday:'short', hour:'numeric', minute:'2-digit'})}</span>
+     <small class="src">${e.src === 'voice' ? '🎤 heard' : '👆 tapped'}</small></li>`).join('')
+    || '<li><small>Nothing yet. Chris is being suspiciously honest.</small></li>';
+}
+
+$('tap').onclick = () => add('tap');
+$('undo').onclick = () => { events.pop(); save(); render(); };
+$('reset').onclick = () => {
+  if (confirm('Delete all counts?')) { events = []; save(); render(); }
+};
+$('export').onclick = () => {
+  const csv = 'timestamp,source\n' + events.map(e => `${new Date(e.t).toISOString()},${e.src}`).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = 'chris-allegedly.csv';
+  a.click();
+};
+
+// --- Voice listening (Web Speech API; Chrome/Edge/Safari) ---
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, listening = false;
+
+// Phonetic matching: reduce a word to its consonant skeleton so that
+// "allegedly", "alledgedly", "alegedly", "a leg edly" etc. all collapse to the same key.
+function phoneticKey(w) {
+  return w.toLowerCase().replace(/[^a-z]/g, '')
+    .replace(/dge|dg/g, 'j').replace(/g(?=[eiy])/g, 'j')   // soft g / dg -> j
+    .replace(/ph/g, 'f').replace(/ck|c(?=[aou])|q/g, 'k')
+    .replace(/[aeiouyhw]/g, '')                              // drop vowels
+    .replace(/(.)\1+/g, '$1');                               // collapse doubles
+}
+const TARGET = phoneticKey('allegedly'); // "ljdl"; "alleged" -> "ljd" so it will not match
+
+// Count matches in one transcript. Tries 1-3 adjacent words joined, so a
+// recogniser that splits the word ("a leg edly") still counts once.
+function countIn(text) {
+  const words = text.toLowerCase().match(/[a-z']+/g) || [];
+  let n = 0;
+  for (let i = 0; i < words.length; ) {
+    let hit = 0;
+    for (let len = 1; len <= 3 && i + len <= words.length; len++) {
+      const joined = words.slice(i, i + len).join('');
+      if (joined.length >= 6 && phoneticKey(joined) === TARGET) { hit = len; break; }
+    }
+    if (hit) { n++; i += hit; } else i++;
+  }
+  return n;
+}
+
+function startListening() {
+  rec = new SR();
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.maxAlternatives = 5; // check every guess the recogniser offers
+  rec.lang = 'en-US';
+  const counted = {}; // per-result-index count of words already added
+  rec.onresult = ev => {
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      let n = 0; // best count across all alternative transcriptions
+      for (let a = 0; a < ev.results[i].length; a++) n = Math.max(n, countIn(ev.results[i][a].transcript));
+      const prev = counted[i] || 0;
+      for (let k = prev; k < n; k++) add('voice');
+      counted[i] = Math.max(prev, n);
+    }
+  };
+  rec.onerror = e => { $('status').textContent = 'Mic error: ' + e.error; };
+  rec.onend = () => {
+    // The browser stops periodically; restart while the user wants listening.
+    if (listening) { Object.keys(counted).forEach(k => delete counted[k]); try { rec.start(); } catch {} }
+  };
+  rec.start();
+}
+
+$('listen').onclick = () => {
+  if (!SR) { $('status').textContent = 'Voice detection isn\'t supported in this browser — tap mode only.'; return; }
+  listening = !listening;
+  $('listen').classList.toggle('listening', listening);
+  $('listen').textContent = listening ? '⏹ Stop listening' : '🎤 Listen';
+  $('status').textContent = listening ? 'Listening for "allegedly"…' : '';
+  if (listening) startListening(); else rec && rec.stop();
+};
+
+render();
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+</script>
+</body>
+</html>
