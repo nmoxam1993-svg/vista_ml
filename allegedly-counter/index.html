@@ -124,19 +124,44 @@ $('export').onclick = () => {
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, listening = false;
 
+// Phonetic matching: reduce a word to its consonant skeleton so that
+// "allegedly", "alledgedly", "alegedly", "a leg edly" etc. all collapse to the same key.
+function phoneticKey(w) {
+  return w.toLowerCase().replace(/[^a-z]/g, '')
+    .replace(/dge|dg/g, 'j').replace(/g(?=[eiy])/g, 'j')   // soft g / dg -> j
+    .replace(/ph/g, 'f').replace(/ck|c(?=[aou])|q/g, 'k')
+    .replace(/[aeiouyhw]/g, '')                              // drop vowels
+    .replace(/(.)\1+/g, '$1');                               // collapse doubles
+}
+const TARGET = phoneticKey('allegedly'); // "ljdl"; "alleged" -> "ljd" so it will not match
+
+// Count matches in one transcript. Tries 1-3 adjacent words joined, so a
+// recogniser that splits the word ("a leg edly") still counts once.
 function countIn(text) {
-  return (text.toLowerCase().match(/\ballegedly\b/g) || []).length;
+  const words = text.toLowerCase().match(/[a-z']+/g) || [];
+  let n = 0;
+  for (let i = 0; i < words.length; ) {
+    let hit = 0;
+    for (let len = 1; len <= 3 && i + len <= words.length; len++) {
+      const joined = words.slice(i, i + len).join('');
+      if (joined.length >= 6 && phoneticKey(joined) === TARGET) { hit = len; break; }
+    }
+    if (hit) { n++; i += hit; } else i++;
+  }
+  return n;
 }
 
 function startListening() {
   rec = new SR();
   rec.continuous = true;
   rec.interimResults = true;
+  rec.maxAlternatives = 5; // check every guess the recogniser offers
   rec.lang = 'en-US';
   const counted = {}; // per-result-index count of words already added
   rec.onresult = ev => {
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
-      const n = countIn(ev.results[i][0].transcript);
+      let n = 0; // best count across all alternative transcriptions
+      for (let a = 0; a < ev.results[i].length; a++) n = Math.max(n, countIn(ev.results[i][a].transcript));
       const prev = counted[i] || 0;
       for (let k = prev; k < n; k++) add('voice');
       counted[i] = Math.max(prev, n);
